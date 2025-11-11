@@ -1023,7 +1023,7 @@ namespace ACE.Server.WorldObjects
             if (PhysicsObj == null) return;
 
             if (!excludeSelf && this is Player self)
-                self.EnqueueAction(new ActionEventDelegate(() => delegateAction(self)));
+                self.EnqueueAction(new ActionEventDelegate(ActionType.WorldObjectNetworking_BroadcastSelf, () => delegateAction(self)));
 
             foreach (var player in PhysicsObj.ObjMaint.GetKnownPlayersValuesAsPlayer())
             {
@@ -1033,7 +1033,7 @@ namespace ACE.Server.WorldObjects
                 if (excludeSelf && this == player)
                     continue;
 
-                player.EnqueueAction(new ActionEventDelegate(() => delegateAction(player)));
+                player.EnqueueAction(new ActionEventDelegate(ActionType.WorldObjectNetworking_BroadcastOther, () => delegateAction(player)));
             }
         }
 
@@ -1061,11 +1061,12 @@ namespace ACE.Server.WorldObjects
 
             var animLength = Physics.Animation.MotionTable.GetAnimationLength(MotionTableId, MotionStance.Magic, motionCommand, speed);
 
-            actionChain.AddAction(this, () =>
-            {
-                if (this is Player player && player.MagicState.IsCasting)
-                    EnqueueBroadcastMotion(motion);
-            });
+            actionChain.AddAction(this, new ActionEventDelegate(
+                ActionType.WorldObjectNetworking_EnqueueMotionMagic,
+                () => {
+                    if (this is Player player && player.MagicState.IsCasting)
+                        EnqueueBroadcastMotion(motion);
+                }));
             actionChain.AddDelaySeconds(animLength);
 
             return animLength;
@@ -1089,14 +1090,15 @@ namespace ACE.Server.WorldObjects
             else
                 animLength = Physics.Animation.MotionTable.GetAnimationLength(MotionTableId, stance, motionCommand, speed);
 
-            actionChain.AddAction(this, () =>
-            {
-                if (castGesture && this is Player player && !player.MagicState.IsCasting)
-                    return;
+            actionChain.AddAction(this, new ActionEventDelegate(
+                ActionType.WorldObjectNetworking_EnqueueMotion,
+                () => {
+                    if (castGesture && this is Player player && !player.MagicState.IsCasting)
+                        return;
 
-                CurrentMotionState = motion;
-                EnqueueBroadcastMotion(motion);
-            });
+                    CurrentMotionState = motion;
+                    EnqueueBroadcastMotion(motion);
+                }));
 
             if (half)
                 animLength *= 0.5f;
@@ -1115,18 +1117,20 @@ namespace ACE.Server.WorldObjects
 
             var animLength = Physics.Animation.MotionTable.GetAnimationLength(MotionTableId, stance, motionCommand, speed);
 
-            actionChain.AddAction(this, () =>
-            {
-                // if no longer in missile combat, don't bother
-                if (this is Player player && player.CombatMode != CombatMode.Missile) return;
+            actionChain.AddAction(this, new ActionEventDelegate(
+                ActionType.WorldObjectNetworking_EnqueueMotionMissile,
+                () =>
+                {
+                    // if no longer in missile combat, don't bother
+                    if (this is Player player && player.CombatMode != CombatMode.Missile) return;
 
-                // retain original profile of function, but if something else has changed the stance (such as weapon swapping),
-                // do not thrash CurrentMotionState.Stance
-                if (CurrentMotionState.Stance == stance)
-                    CurrentMotionState = motion;
+                    // retain original profile of function, but if something else has changed the stance (such as weapon swapping),
+                    // do not thrash CurrentMotionState.Stance
+                    if (CurrentMotionState.Stance == stance)
+                        CurrentMotionState = motion;
 
-                EnqueueBroadcastMotion(motion);
-            });
+                    EnqueueBroadcastMotion(motion);
+                }));
             actionChain.AddDelaySeconds(animLength);
 
             return animLength;
@@ -1146,20 +1150,21 @@ namespace ACE.Server.WorldObjects
 
             var animLength = Physics.Animation.MotionTable.GetAnimationLength(MotionTableId, stance, motionCommand, speed);
 
-            actionChain.AddAction(this, () =>
-            {
-                // if no longer in missile combat, don't bother
-                if (this is Player player && player.CombatMode != CombatMode.Missile) return;
+            actionChain.AddAction(this, new ActionEventDelegate(
+                ActionType.WorldObjectNetworking_EnqueueMotionMissilePersist,
+                () => {
+                    // if no longer in missile combat, don't bother
+                    if (this is Player player && player.CombatMode != CombatMode.Missile) return;
 
-                // retain original profile of function, but if something else has changed the stance (such as weapon swapping),
-                // do not thrash CurrentMotionState.Stance
-                if (CurrentMotionState.Stance == stance)
-                    CurrentMotionState = motion;
+                    // retain original profile of function, but if something else has changed the stance (such as weapon swapping),
+                    // do not thrash CurrentMotionState.Stance
+                    if (CurrentMotionState.Stance == stance)
+                        CurrentMotionState = motion;
 
-                motion.Persist(CurrentMotionState);
+                    motion.Persist(CurrentMotionState);
 
-                EnqueueBroadcastMotion(motion);
-            });
+                    EnqueueBroadcastMotion(motion);
+                }));
             actionChain.AddDelaySeconds(animLength);
 
             return animLength;
@@ -1185,19 +1190,20 @@ namespace ACE.Server.WorldObjects
             else
                 animLength = Physics.Animation.MotionTable.GetAnimationLength(MotionTableId, stance, motionCommand, speed);
 
-            actionChain.AddAction(this, () =>
-            {
-                if (castGesture && this is Player player && !player.MagicState.IsCasting)
-                    return;
+            actionChain.AddAction(this, new ActionEventDelegate(
+                ActionType.WorldObjectNetworking_EnqueueMotionMagicPersist,
+                () => {
+                    if (castGesture && this is Player player && !player.MagicState.IsCasting)
+                        return;
 
-                var motion = new Motion(stance, motionCommand, speed);
-                motion.Persist(CurrentMotionState);
+                    var motion = new Motion(stance, motionCommand, speed);
+                    motion.Persist(CurrentMotionState);
 
-                motion.MotionState.TurnSpeed = 2.25f;  // ??
+                    motion.MotionState.TurnSpeed = 2.25f;  // ??
 
-                CurrentMotionState = motion;
-                EnqueueBroadcastMotion(motion);
-            });
+                    CurrentMotionState = motion;
+                    EnqueueBroadcastMotion(motion);
+                }));
 
             if (half)
                 animLength *= 0.5f;
@@ -1232,19 +1238,20 @@ namespace ACE.Server.WorldObjects
                     animLength += Physics.Animation.MotionTable.GetAnimationLength(MotionTableId, stance, motionCommand, speed);
             }
 
-            actionChain.AddAction(this, () =>
-            {
-                if (checkCasting && this is Player player && player.MagicState != null && !player.MagicState.IsCasting)
-                    return;
+            actionChain.AddAction(this, new ActionEventDelegate(
+                ActionType.WorldObjectNetworking_EnqueueMotionMagicAction,
+                () => {
+                    if (checkCasting && this is Player player && player.MagicState != null && !player.MagicState.IsCasting)
+                        return;
 
-                CurrentMotionState = motion;
-                EnqueueBroadcastMotion(motion, null, false);
+                    CurrentMotionState = motion;
+                    EnqueueBroadcastMotion(motion, null, false);
 
-                ApplyPhysicsMotion(new Motion(stance, MotionCommand.Ready, speed));
+                    ApplyPhysicsMotion(new Motion(stance, MotionCommand.Ready, speed));
 
-                foreach (var motionCommand in motionCommands)
-                    ApplyPhysicsMotion(new Motion(stance, motionCommand, speed));
-            });
+                    foreach (var motionCommand in motionCommands)
+                        ApplyPhysicsMotion(new Motion(stance, motionCommand, speed));
+                }));
 
             actionChain.AddDelaySeconds(animLength);
 
@@ -1269,12 +1276,13 @@ namespace ACE.Server.WorldObjects
                     animLength = Physics.Animation.MotionTable.GetAnimationLength(MotionTableId, stance, prevCommand.Value, motionCommand, speed);
             }
 
-            actionChain.AddAction(this, () =>
-            {
-                CurrentMotionState = motion;
+            actionChain.AddAction(this, new ActionEventDelegate(
+                ActionType.WorldObjectNetworking_EnqueueMotionForce,
+                () => {
+                    CurrentMotionState = motion;
 
-                EnqueueBroadcastMotion(motion);
-            });
+                    EnqueueBroadcastMotion(motion);
+                }));
 
             actionChain.AddDelaySeconds(animLength * animMod);
             return animLength;

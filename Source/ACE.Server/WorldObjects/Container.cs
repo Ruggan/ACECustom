@@ -97,7 +97,7 @@ namespace ACE.Server.WorldObjects
             {
                 DatabaseManager.Shard.GetInventoryInParallel(biota.Id, false, biotas =>
                 {
-                    EnqueueAction(new ActionEventDelegate(() => SortBiotasIntoInventory(biotas)));
+                    EnqueueAction(new ActionEventDelegate(ActionType.Container_SortBiotasIntoInventory, () => SortBiotasIntoInventory(biotas)));
                 });
             }
         }
@@ -885,7 +885,9 @@ namespace ACE.Server.WorldObjects
                     actionChain.AddDelaySeconds(15);
                 else
                     actionChain.AddDelaySeconds(ResetInterval.Value);
-                actionChain.AddAction(this, Reset);
+                actionChain.AddAction(this, new ActionEventDelegate(
+                    ActionType.Container_ResetAfterOpen,
+                    () => Reset()));
                 //actionChain.AddAction(this, () =>
                 //{
                 //    Close(player);
@@ -964,7 +966,9 @@ namespace ACE.Server.WorldObjects
             {
                 var actionChain = new ActionChain();
                 actionChain.AddDelaySeconds(animTime / 2.0f);
-                actionChain.AddAction(this, () => FinishClose(player));
+                actionChain.AddAction(this, new ActionEventDelegate(
+                    ActionType.Container_FinishClose,
+                    () => FinishClose(player)));
                 actionChain.EnqueueChain();
             }
         }

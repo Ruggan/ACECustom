@@ -8,7 +8,9 @@ namespace ACE.Server.Entity.Actions
 {
     public class ActionQueue : IActor
     {
+
         protected ConcurrentQueue<IAction> Queue { get; } = new ConcurrentQueue<IAction>();
+        protected ConcurrentDictionary<ActionType, int> CountByQueueItemType { get; } = new ConcurrentDictionary<ActionType, int>();
 
         private static readonly log4net.ILog log = log4net.LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
         
@@ -34,8 +36,7 @@ namespace ACE.Server.Entity.Actions
 
         public void RunActions()
         {
-            if (Queue.IsEmpty)
-                return;
+            if (Queue.IsEmpty) return;
 
             // CONFIGURABLE: Enable/disable performance tracking
             var enableTracking = ACE.Server.Managers.PropertyManager.GetBool("action_queue_tracking_enabled", false).Item;
@@ -59,7 +60,7 @@ namespace ACE.Server.Entity.Actions
 
             for (int i = 0; i < count; i++)
             {
-                if (Queue.TryDequeue(out var result))
+                if (Queue.TryDequeue(out IAction action))
                 {
                     // Track performance if enabled
                     if (enableTracking)
@@ -103,6 +104,13 @@ namespace ACE.Server.Entity.Actions
                 {
                     var remainingActions = Queue.Count;
                     var warningMsg = $"[PERFORMANCE] ActionQueue throttle saturated for {actionQueueThrottleWarningCount} consecutive ticks! Processed {count} actions, {remainingActions} remain queued. Original queue size: {originalQueueSize}. Consider increasing limit from {actionThrottleLimit}.";
+
+                    var actionSummary = CountByQueueItemType
+                        .Where(kvp => kvp.Value > 0)
+                        .OrderByDescending(kvp => kvp.Value)
+                        .Select(kvp => $" - {kvp.Key}: {kvp.Value}");
+                    warningMsg += "\nQueue Breakdown:\n" + string.Join("\n", actionSummary);
+
                     log.Warn(warningMsg);
                     
                     // Send to Discord if configured
@@ -129,8 +137,9 @@ namespace ACE.Server.Entity.Actions
             }
         }
 
-        public void EnqueueAction(IAction action)
+        public void EnqueueAction(IAction action) 
         {
+            CountByQueueItemType.AddOrUpdate(action.Type, 1, (key, oldValue) => oldValue + 1);
             Queue.Enqueue(action);
         }
 

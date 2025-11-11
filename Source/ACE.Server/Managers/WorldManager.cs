@@ -152,7 +152,9 @@ namespace ACE.Server.Managers
                 DatabaseManager.Shard.GetPossessedBiotasInParallel(character.Id, biotas =>
                 {
                     log.Debug($"GetPossessedBiotasInParallel for {character.Name} took {(DateTime.UtcNow - start).TotalMilliseconds:N0} ms, Queue Size: {DatabaseManager.Shard.QueueCount}");
-                    ActionQueue.EnqueueAction(new ActionEventDelegate(() => DoPlayerEnterWorld(session, fullCharacter, offlinePlayer.Biota, biotas)));
+                    ActionQueue.EnqueueAction(new ActionEventDelegate(
+                        ActionType.WorldManager_PlayerEnterWorld,
+                        () => DoPlayerEnterWorld(session, fullCharacter, offlinePlayer.Biota, biotas)));
                 });
             });            
         }
@@ -291,11 +293,12 @@ namespace ACE.Server.Managers
 
                 var actionChain = new ActionChain();
                 actionChain.AddDelaySeconds(5.0f);
-                actionChain.AddAction(session.Player, () =>
-                {
-                    if (session != null && session.Player != null)
-                        session.Player.Teleport(fixLoc);
-                });
+                actionChain.AddAction(session.Player, new ActionEventDelegate(
+                    ActionType.Landblock_TeleportPlayerAfterFailureToAdd,
+                    () => {
+                        if (session != null && session.Player != null)
+                            session.Player.Teleport(fixLoc);
+                    }));
                 actionChain.EnqueueChain();
             }
 
@@ -355,13 +358,14 @@ namespace ACE.Server.Managers
         /// </summary>
         public static void ThreadSafeTeleport(Player player, Position newPosition, IAction actionToFollowUpWith = null, bool fromPortal = false)
         {
-            EnqueueAction(new ActionEventDelegate(() =>
-            {
-                player.Teleport(newPosition, fromPortal);
+            EnqueueAction(new ActionEventDelegate(
+                ActionType.WorldManager_ThreadSafeTeleport,
+                () => {
+                    player.Teleport(newPosition, fromPortal);
 
-                if (actionToFollowUpWith != null)
-                    EnqueueAction(actionToFollowUpWith);
-            }));
+                    if (actionToFollowUpWith != null)
+                        EnqueueAction(actionToFollowUpWith);
+                }));
         }
 
         public static void EnqueueAction(IAction action)

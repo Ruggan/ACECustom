@@ -87,7 +87,7 @@ namespace ACE.Server.WorldObjects
                 var lifestoneBlock = LandblockManager.GetLandblock(new LandblockId(Sanctuary.Landblock << 16 | 0xFFFF), true, null);
 
                 // We enqueue the work onto the target landblock to ensure thread-safety. It's highly likely the lifestoneBlock is far away, and part of a different landblock group (and thus different thread).
-                lifestoneBlock.EnqueueAction(new ActionEventDelegate(() => lifestoneBlock.EnqueueBroadcast(excludePlayers, true, Sanctuary, LocalBroadcastRangeSq, broadcastMsg)));
+                lifestoneBlock.EnqueueAction(new ActionEventDelegate(ActionType.PlayerDeath_Broadcast, () => lifestoneBlock.EnqueueBroadcast(excludePlayers, true, Sanctuary, LocalBroadcastRangeSq, broadcastMsg)));
             }
 
             return deathMessage;
@@ -233,17 +233,18 @@ namespace ACE.Server.WorldObjects
             var animLength = DatManager.PortalDat.ReadFromDat<MotionTable>(MotionTableId).GetAnimationLength(MotionCommand.Dead);
             dieChain.AddDelaySeconds(animLength + 1.0f);
 
-            dieChain.AddAction(this, () =>
-            {
-                CreateCorpse(topDamager, hadVitae);
+            dieChain.AddAction(this, new ActionEventDelegate(
+                ActionType.PlayerDeath_CreateCorpseAndTeleport,
+                () => {
+                    CreateCorpse(topDamager, hadVitae);
 
-                ThreadSafeTeleportOnDeath(); // enter portal space
+                    ThreadSafeTeleportOnDeath(); // enter portal space
 
-                if (IsPKDeath(topDamager) || IsPKLiteDeath(topDamager))
-                    SetMinimumTimeSincePK();
+                    if (IsPKDeath(topDamager) || IsPKLiteDeath(topDamager))
+                        SetMinimumTimeSincePK();
 
-                IsBusy = false;
-            });
+                    IsBusy = false;
+                }));
 
             dieChain.EnqueueChain();
         }
@@ -266,7 +267,7 @@ namespace ACE.Server.WorldObjects
             // teleport to sanctuary or best location
             var newPosition = Sanctuary ?? Instantiation ?? Location;
 
-            WorldManager.ThreadSafeTeleport(this, newPosition, new ActionEventDelegate(() =>
+            WorldManager.ThreadSafeTeleport(this, newPosition, new ActionEventDelegate(ActionType.PlayerDeath_EnqueueTeleport, () =>
             {
                 // Stand back up
                 SetCombatMode(CombatMode.NonCombat);
@@ -276,33 +277,34 @@ namespace ACE.Server.WorldObjects
                 var teleportChain = new ActionChain();
                 if (!IsLoggingOut) // If we're in the process of logging out, we skip the delay
                     teleportChain.AddDelaySeconds(3.0f);
-                teleportChain.AddAction(this, () =>
-                {
-                    // currently happens while in portal space
-                    var newHealth = (uint)Math.Round(Health.MaxValue * 0.75f);
-                    var newStamina = (uint)Math.Round(Stamina.MaxValue * 0.75f);
-                    var newMana = (uint)Math.Round(Mana.MaxValue * 0.75f);
+                teleportChain.AddAction(this, new ActionEventDelegate(
+                    ActionType.PlayerDeath_Teleport,
+                    () => {
+                        // currently happens while in portal space
+                        var newHealth = (uint)Math.Round(Health.MaxValue * 0.75f);
+                        var newStamina = (uint)Math.Round(Stamina.MaxValue * 0.75f);
+                        var newMana = (uint)Math.Round(Mana.MaxValue * 0.75f);
 
-                    var msgHealthUpdate = new GameMessagePrivateUpdateAttribute2ndLevel(this, Vital.Health, newHealth);
-                    var msgStaminaUpdate = new GameMessagePrivateUpdateAttribute2ndLevel(this, Vital.Stamina, newStamina);
-                    var msgManaUpdate = new GameMessagePrivateUpdateAttribute2ndLevel(this, Vital.Mana, newMana);
+                        var msgHealthUpdate = new GameMessagePrivateUpdateAttribute2ndLevel(this, Vital.Health, newHealth);
+                        var msgStaminaUpdate = new GameMessagePrivateUpdateAttribute2ndLevel(this, Vital.Stamina, newStamina);
+                        var msgManaUpdate = new GameMessagePrivateUpdateAttribute2ndLevel(this, Vital.Mana, newMana);
 
-                    UpdateVital(Health, newHealth);
-                    UpdateVital(Stamina, newStamina);
-                    UpdateVital(Mana, newMana);
+                        UpdateVital(Health, newHealth);
+                        UpdateVital(Stamina, newStamina);
+                        UpdateVital(Mana, newMana);
 
-                    Session.Network.EnqueueSend(msgHealthUpdate, msgStaminaUpdate, msgManaUpdate);
+                        Session.Network.EnqueueSend(msgHealthUpdate, msgStaminaUpdate, msgManaUpdate);
 
-                    // reset damage history for this player
-                    DamageHistory.Reset();
+                        // reset damage history for this player
+                        DamageHistory.Reset();
 
-                    OnHealthUpdate();
+                        OnHealthUpdate();
 
-                    IsInDeathProcess = false;
+                        IsInDeathProcess = false;
 
-                    if (IsLoggingOut)
-                        LogOut_Final(true);
-                });
+                        if (IsLoggingOut)
+                            LogOut_Final(true);
+                    }));
 
                 teleportChain.EnqueueChain();
             }));
@@ -352,7 +354,9 @@ namespace ACE.Server.WorldObjects
 
                 var suicideChain = new ActionChain();
                 suicideChain.AddDelaySeconds(3.0f);
-                suicideChain.AddAction(this, () => HandleSuicide(numDeaths, step + 1));
+                suicideChain.AddAction(this, new ActionEventDelegate(
+                    ActionType.PlayerDeath_HandleSuicide,
+                    () => HandleSuicide(numDeaths, step + 1)));
                 suicideChain.EnqueueChain();
             }
             else

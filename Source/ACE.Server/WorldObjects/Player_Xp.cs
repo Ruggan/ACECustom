@@ -95,7 +95,7 @@ namespace ACE.Server.WorldObjects
             }
 
             // Make sure UpdateXpAndLevel is done on this players thread
-            EnqueueAction(new ActionEventDelegate(() => UpdateXpAndLevel(amount, xpType)));
+            EnqueueAction(new ActionEventDelegate(ActionType.PlayerXp_UpdateXpAndLevel, () => UpdateXpAndLevel(amount, xpType)));
 
             // for passing XP up the allegiance chain,
             // this function is only called at the very beginning, to start the process.
@@ -208,16 +208,17 @@ namespace ACE.Server.WorldObjects
             {
                 var actionChain = new ActionChain();
                 actionChain.AddDelaySeconds(2.0f);
-                actionChain.AddAction(this, () =>
-                {
-                    var vitae = EnchantmentManager.GetVitae();
-                    if (vitae != null)
-                    {
-                        var curPenalty = vitae.StatModValue;
-                        if (curPenalty.EpsilonEquals(1.0f) || curPenalty > 1.0f)
-                            EnchantmentManager.RemoveVitae();
-                    }
-                });
+                actionChain.AddAction(this, new ActionEventDelegate(
+                    ActionType.PlayerXp_RemoveVitae,
+                    () => {
+                        var vitae = EnchantmentManager.GetVitae();
+                        if (vitae != null)
+                        {
+                            var curPenalty = vitae.StatModValue;
+                            if (curPenalty.EpsilonEquals(1.0f) || curPenalty > 1.0f)
+                                EnchantmentManager.RemoveVitae();
+                        }
+                    }));
                 actionChain.EnqueueChain();
             }
         }
@@ -496,24 +497,25 @@ namespace ACE.Server.WorldObjects
 
             var actionChain = new ActionChain();
             actionChain.AddDelaySeconds(5.0f);
-            actionChain.AddAction(this, () =>
-            {
-                var xpType = verifyXp > 0 ? "unassigned experience" : "experience points";
+            actionChain.AddAction(this, new ActionEventDelegate(
+                ActionType.PlayerXp_HandleMissingXp,
+                () => {
+                    var xpType = verifyXp > 0 ? "unassigned experience" : "experience points";
 
-                var msg = $"This character was missing some {xpType} --\nYou have gained an additional {Math.Abs(verifyXp).ToString("N0")} {xpType}!";
+                    var msg = $"This character was missing some {xpType} --\nYou have gained an additional {Math.Abs(verifyXp).ToString("N0")} {xpType}!";
 
-                Session.Network.EnqueueSend(new GameMessageSystemChat(msg, ChatMessageType.Broadcast));
+                    Session.Network.EnqueueSend(new GameMessageSystemChat(msg, ChatMessageType.Broadcast));
 
-                if (verifyXp < 0)
-                {
-                    // add to character's total XP
-                    TotalExperience -= verifyXp;
+                    if (verifyXp < 0)
+                    {
+                        // add to character's total XP
+                        TotalExperience -= verifyXp;
 
-                    CheckForLevelup();
-                }
+                        CheckForLevelup();
+                    }
 
-                RemoveProperty(PropertyInt64.VerifyXp);
-            });
+                    RemoveProperty(PropertyInt64.VerifyXp);
+                }));
 
             actionChain.EnqueueChain();
         }
@@ -582,13 +584,15 @@ namespace ACE.Server.WorldObjects
 
 
                 var actionChain = new ActionChain();
-                actionChain.AddAction(this, () =>
-                {
-                    var msg = $"Your {item.Name} has increased in power to level {newItemLevel}!";
-                    Session.Network.EnqueueSend(new GameMessageSystemChat(msg, ChatMessageType.Broadcast));
+                actionChain.AddAction(this, new ActionEventDelegate(
+                    ActionType.PlayerXp_ItemIncreasedInPower,
+                    () =>
+                    {
+                        var msg = $"Your {item.Name} has increased in power to level {newItemLevel}!";
+                        Session.Network.EnqueueSend(new GameMessageSystemChat(msg, ChatMessageType.Broadcast));
 
-                    EnqueueBroadcast(new GameMessageScript(Guid, PlayScript.AetheriaLevelUp));
-                });
+                        EnqueueBroadcast(new GameMessageScript(Guid, PlayScript.AetheriaLevelUp));
+                    }));
                 actionChain.EnqueueChain();
             }
         }
