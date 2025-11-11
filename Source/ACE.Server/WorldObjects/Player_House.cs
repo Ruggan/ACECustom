@@ -531,9 +531,7 @@ namespace ACE.Server.WorldObjects
             {
                 var evictChain = new ActionChain();
                 evictChain.AddDelaySeconds(5.0f);   // todo: need inventory callback
-                evictChain.AddAction(this, new ActionEventDelegate(
-                    ActionType.PlayerHouse_HandleEvictionOnLogin,
-                    () => HandleEviction()));
+                evictChain.AddAction(this, ActionType.PlayerHouse_HandleEvictionOnLogin, HandleEviction);
                 evictChain.EnqueueChain();
                 return;
             }
@@ -570,25 +568,24 @@ namespace ACE.Server.WorldObjects
         {
             var actionChain = new ActionChain();
             actionChain.AddDelaySeconds(5.0f);
-            actionChain.AddAction(this, new ActionEventDelegate(
-                ActionType.PlayerHouse_NotificationsOnLogin,
-                () => {
-                    if (House == null || House.SlumLord == null) return;
+            actionChain.AddAction(this, ActionType.PlayerHouse_NotificationsOnLogin, () =>
+            {
+                if (House == null || House.SlumLord == null) return;
 
-                    if (House.HouseStatus == HouseStatus.Active && !House.SlumLord.IsRentPaid() && PropertyManager.GetBool("house_rent_enabled", true).Item)
-                    {
-                        Session.Network.EnqueueSend(new GameMessageSystemChat($"Warning!  You have not paid your maintenance costs for the last {(House.IsApartment ? "90" : "30")} day maintenance period.  Please pay these costs by this deadline or you will lose your house, and all your items within it.", ChatMessageType.System));
-                    }
+                if (House.HouseStatus == HouseStatus.Active && !House.SlumLord.IsRentPaid() && PropertyManager.GetBool("house_rent_enabled", true).Item)
+                {
+                    Session.Network.EnqueueSend(new GameMessageSystemChat($"Warning!  You have not paid your maintenance costs for the last {(House.IsApartment ? "90" : "30")} day maintenance period.  Please pay these costs by this deadline or you will lose your house, and all your items within it.", ChatMessageType.System));
+                }
 
-                    if (House.HouseOwner == Guid.Full && !House.SlumLord.HasRequirements(this) && PropertyManager.GetBool("house_purchase_requirements").Item)
-                    {
-                        var rankStr = AllegianceNode != null ? $"{AllegianceNode.Rank}" : "";
-                        Session.Network.EnqueueSend(new GameMessageSystemChat($"Warning!  Your allegiance rank {rankStr} is now below the requirements for owning a mansion.  Please raise your allegiance rank to {House.SlumLord.GetAllegianceMinLevel()} before the end of the maintenance period or you will lose your mansion, and all your items within it.", ChatMessageType.System));
-                    }
+                if (House.HouseOwner == Guid.Full && !House.SlumLord.HasRequirements(this) && PropertyManager.GetBool("house_purchase_requirements").Item)
+                {
+                    var rankStr = AllegianceNode != null ? $"{AllegianceNode.Rank}" : "";
+                    Session.Network.EnqueueSend(new GameMessageSystemChat($"Warning!  Your allegiance rank {rankStr} is now below the requirements for owning a mansion.  Please raise your allegiance rank to {House.SlumLord.GetAllegianceMinLevel()} before the end of the maintenance period or you will lose your mansion, and all your items within it.", ChatMessageType.System));
+                }
 
-                    // TODO: for account houses, run this even if char doesn't own house
-                    IsMultiHouseOwner();
-                }));
+                // TODO: for account houses, run this even if char doesn't own house
+                IsMultiHouseOwner();
+            });
             actionChain.EnqueueChain();
         }
 
@@ -660,18 +657,17 @@ namespace ACE.Server.WorldObjects
             // why has this changed? use callback?
             var actionChain = new ActionChain();
             actionChain.AddDelaySeconds(3.0f);
-            actionChain.AddAction(this, new ActionEventDelegate(
-                ActionType.PlayerHouse_SetHouseDataOnOwnerChange,
-                () => {
-                    HandleActionQueryHouse();
-                    house.UpdateRestrictionDB();
+            actionChain.AddAction(this, ActionType.PlayerHouse_SetHouseDataOnOwnerChange, () =>
+            {
+                HandleActionQueryHouse();
+                house.UpdateRestrictionDB();
 
-                    // boot anyone who may have been wandering around inside...
-                    HandleActionBootAll(false);
+                // boot anyone who may have been wandering around inside...
+                HandleActionBootAll(false);
 
-                    HouseManager.AddRentQueue(this, house.Guid.Full);
-                    slumlord.ActOnUse(this);
-                }));
+                HouseManager.AddRentQueue(this, house.Guid.Full);
+                slumlord.ActOnUse(this);
+            });
             actionChain.EnqueueChain();
         }
 

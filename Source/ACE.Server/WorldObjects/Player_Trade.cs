@@ -160,11 +160,10 @@ namespace ACE.Server.WorldObjects
 
             var actionChain = new ActionChain();
             actionChain.AddDelaySeconds(0.001f);
-            actionChain.AddAction(target, new ActionEventDelegate(
-                ActionType.PlayerTrade_EnqueueSendAddToTrade,
-                () => {
+            actionChain.AddAction(target, ActionType.PlayerTrade_EnqueueSendAddToTrade, () =>
+            {
                     target.Session.Network.EnqueueSend(new GameEventAddToTrade(target.Session, itemGuid, TradeSide.Partner));
-                }));
+            });
             actionChain.EnqueueChain();
         }
 
@@ -250,32 +249,31 @@ namespace ACE.Server.WorldObjects
 
             var actionChain = new ActionChain();
             actionChain.AddDelaySeconds(0.5f);
-            actionChain.AddAction(CurrentLandblock, new ActionEventDelegate(
-                ActionType.PlayerTrade_FinalizeTrade,
-                () => {
-                    foreach (var wo in myEscrow)
-                        TryCreateInInventoryWithNetworking(wo);
+            actionChain.AddAction(CurrentLandblock, ActionType.PlayerTrade_FinalizeTrade, () =>
+            {
+                foreach (var wo in myEscrow)
+                    TryCreateInInventoryWithNetworking(wo);
 
-                    foreach (var wo in targetEscrow)
-                        target.TryCreateInInventoryWithNetworking(wo);
+                foreach (var wo in targetEscrow)
+                    target.TryCreateInInventoryWithNetworking(wo);
 
-                    Session.Network.EnqueueSend(new GameEventWeenieError(Session, WeenieError.TradeComplete));
-                    target.Session.Network.EnqueueSend(new GameEventWeenieError(target.Session, WeenieError.TradeComplete));
+                Session.Network.EnqueueSend(new GameEventWeenieError(Session, WeenieError.TradeComplete));
+                target.Session.Network.EnqueueSend(new GameEventWeenieError(target.Session, WeenieError.TradeComplete));
 
-                    TradeTransferInProgress = false;
-                    target.TradeTransferInProgress = false;
+                TradeTransferInProgress = false;
+                target.TradeTransferInProgress = false;
                         
-                    IsBusy = false;
-                    target.IsBusy = false;
+                IsBusy = false;
+                target.IsBusy = false;
 
-                    DatabaseManager.Shard.SaveBiotasInParallel(tradedItems, null, this.Guid.ToString() + " : " + target.Guid.ToString());
+                DatabaseManager.Shard.SaveBiotasInParallel(tradedItems, null, this.Guid.ToString() + " : " + target.Guid.ToString());
 
-                    // Log the trade
-                    TransferLogger.LogTrade(this, target, targetEscrow, myEscrow);
+                // Log the trade
+                TransferLogger.LogTrade(this, target, targetEscrow, myEscrow);
 
-                    HandleActionResetTrade(Guid);
-                    target.HandleActionResetTrade(target.Guid);
-                }));
+                HandleActionResetTrade(Guid);
+                target.HandleActionResetTrade(target.Guid);
+            });
 
             actionChain.EnqueueChain();
         }

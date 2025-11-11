@@ -292,9 +292,7 @@ namespace ACE.Server.WorldObjects
             // and spell fx are visible
             var actionChain = new ActionChain();
             actionChain.AddDelaySeconds(0.1);
-            actionChain.AddAction(this, new ActionEventDelegate(
-                ActionType.CreatureEquipment_TryActivateItemSpellsOnWield,
-                () => TryActivateItemSpells(worldObject)));
+            actionChain.AddAction(this, ActionType.CreatureEquipment_TryActivateItemSpellsOnWield, () => TryActivateItemSpells(worldObject));
             actionChain.EnqueueChain();
 
             return true;

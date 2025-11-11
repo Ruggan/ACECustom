@@ -885,9 +885,7 @@ namespace ACE.Server.WorldObjects
                     actionChain.AddDelaySeconds(15);
                 else
                     actionChain.AddDelaySeconds(ResetInterval.Value);
-                actionChain.AddAction(this, new ActionEventDelegate(
-                    ActionType.Container_ResetAfterOpen,
-                    () => Reset()));
+                actionChain.AddAction(this, ActionType.Container_Reset, Reset);
                 //actionChain.AddAction(this, () =>
                 //{
                 //    Close(player);
@@ -966,9 +964,7 @@ namespace ACE.Server.WorldObjects
             {
                 var actionChain = new ActionChain();
                 actionChain.AddDelaySeconds(animTime / 2.0f);
-                actionChain.AddAction(this, new ActionEventDelegate(
-                    ActionType.Container_FinishClose,
-                    () => FinishClose(player)));
+                actionChain.AddAction(this, ActionType.Container_FinishClose, () => FinishClose(player));
                 actionChain.EnqueueChain();
             }
         }

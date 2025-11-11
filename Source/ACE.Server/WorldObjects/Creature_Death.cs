@@ -152,7 +152,7 @@ namespace ACE.Server.WorldObjects
             //var deathAnimLength = DatManager.PortalDat.ReadFromDat<MotionTable>(MotionTableId).GetAnimationLength(MotionCommand.Dead);
             dieChain.AddDelaySeconds(deathAnimLength);
 
-            dieChain.AddAction(this, () =>
+            dieChain.AddAction(this, ActionType.CreatureDeath_MakeCorpse, () =>
             {
                 CreateCorpse(topDamager);
                 Destroy();

@@ -697,11 +697,11 @@ namespace ACE.Server.WorldObjects
             // doing a delay here to prevent 'SpellExpired' sounds from overlapping with 'ItemManaDepleted'
             var actionChain = new ActionChain();
             actionChain.AddDelaySeconds(2.0f);
-            actionChain.AddAction(this, new ActionEventDelegate(
-                ActionType.PlayerTick_RemoveSpellsOnItemManaDepleted, () => {
-                    foreach (var spellId in item.Biota.GetKnownSpellsIds(item.BiotaDatabaseLock))
-                        RemoveItemSpell(item, (uint)spellId);
-                }));
+            actionChain.AddAction(this, ActionType.PlayerTick_RemoveSpellsOnItemManaDepleted, () =>
+            {
+                foreach (var spellId in item.Biota.GetKnownSpellsIds(item.BiotaDatabaseLock))
+                    RemoveItemSpell(item, (uint)spellId);
+            });
             actionChain.EnqueueChain();
 
             item.OnSpellsDeactivated();
