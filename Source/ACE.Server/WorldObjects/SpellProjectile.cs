@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Collections.Generic;
 
 using ACE.Common;
 using ACE.Entity;
@@ -8,9 +9,11 @@ using ACE.Entity.Enum.Properties;
 using ACE.Entity.Models;
 using ACE.Server.Entity;
 using ACE.Server.Entity.Actions;
+using ACE.Server.Factories;
 using ACE.Server.Managers;
 using ACE.Server.Network.GameEvent.Events;
 using ACE.Server.Network.GameMessages.Messages;
+using ACE.Server.Physics;
 using ACE.Server.WorldObjects.Entity;
 
 namespace ACE.Server.WorldObjects
@@ -37,6 +40,8 @@ namespace ACE.Server.WorldObjects
         /// make sure there is no attempt to re-proc again when the spell projectile hits
         /// </summary>
         public bool FromProc { get; set; }
+
+        public List<ObjectGuid> HitTargets { get; set; } = new List<ObjectGuid>();
 
         public int DebugVelocity;
 
@@ -268,6 +273,9 @@ namespace ACE.Server.WorldObjects
             {
                 return;
             }
+            // Chain Projectile: Cache velocity before impact zeroes it out
+            var preImpactVelocity = PhysicsObj != null ? PhysicsObj.Velocity : Vector3.Zero;
+            
             var player = ProjectileSource as Player;
 
             if (Info != null && player != null && player.DebugSpell)
@@ -275,6 +283,10 @@ namespace ACE.Server.WorldObjects
                 player.Session.Network.EnqueueSend(new GameMessageSystemChat($"{Name}.OnCollideObject({target?.Name} ({target?.Guid}))", ChatMessageType.Broadcast));
                 player.Session.Network.EnqueueSend(new GameMessageSystemChat(Info.ToString(), ChatMessageType.Broadcast));
             }
+
+            // Chain Projectile: Ignore collisions with targets we've already hit (prevents immediate self-collision on spawn)
+            if (HitTargets.Contains(target.Guid))
+                return;
 
             ProjectileImpact();
 
@@ -338,6 +350,148 @@ namespace ACE.Server.WorldObjects
 
                 if (player != null)
                     Proficiency.OnSuccessUse(player, player.GetCreatureSkill(Spell.School), Spell.PowerMod);
+
+                // Chain Projectile Logic
+                var chainCount = GetProperty(PropertyInt.ChainCount);
+                if (chainCount != null && chainCount > 0)
+                {
+                    HitTargets.Add(creatureTarget.Guid);
+
+                    // find new target
+                    var range = Spell.BaseRangeConstant + 50.0f; // generous search range, validation on specific target later logic? User said "likely the sqrt of the original spell's base range"
+                     // Let's use sqrt of base range as requested, or maybe just a fixed reasonable "bounce" range. 
+                     // Users usually want reliable bounces. 20 yards seems reasonable for a bounce.
+                     // But let's stick to the requested "sqrt of original spell's base range" or "something like that".
+                     // Max range is typically around 40-100? Sqrt(100) = 10. That's kinda small.
+                     // Let's use a flat 20.0f for now, or maybe 1/2 of max range?
+                     // Let's check Spell.BaseRangeConstant.
+                    // User requested original cast range for now
+                    var bounceRange = Spell.BaseRangeConstant; 
+
+                    var nearby = new List<Creature>();
+                    if (creatureTarget.CurrentLandblock != null)
+                    {
+                        var allObjects = creatureTarget.CurrentLandblock.GetWorldObjectsForPhysicsHandling();
+                        foreach (var wo in allObjects)
+                        {
+                            if (wo is Creature c && c != creatureTarget && wo != ProjectileSource && !c.IsDead)
+                            {
+                                if (creatureTarget.GetDistance(c) <= bounceRange)
+                                    nearby.Add(c);
+                            }
+                        }
+                    }
+                    
+                    Creature bestTarget = null;
+                    float bestDist = float.MaxValue;
+
+                    foreach (var potential in nearby)
+                    {
+                        // Don't bounce back to something we already hit
+                        if (HitTargets.Contains(potential.Guid))
+                            continue;
+
+                        // Check hostility / validity
+                        if (sourceCreature != null && !sourceCreature.CanDamage(potential))
+                            continue;
+
+                        var dist = creatureTarget.GetDistance(potential);
+                        if (dist < bestDist)
+                        {
+                            bestDist = dist;
+                            bestTarget = potential;
+                        }
+                    }
+
+                    if (bestTarget != null)
+                    {
+                        // Launch new projectile
+                        // "Set Start Location to the "Cast Origin" of the *current target* (as if they were casting)"
+                        var origins = ProjectileSource.CalculateProjectileOrigins(Spell, ProjectileSpellType.Bolt, bestTarget);
+                         // Note: CalculateProjectileOrigins expects the Caster to be "ProjectileSource". 
+                         // But we want the origin to appear relative to the 'creatureTarget'. 
+                         // effectively we want 'creatureTarget.CalculateProjectileOrigins(...)' but using our spell constraints.
+                         // But 'CalculateProjectileOrigins' creates offsets based on the PhysicsObj radius of the CALLER (ProjectileSource).
+                         // So we should call it on creatureTarget.
+                        
+                        // We need the origins relative to the creatureTarget's position/rotation.
+                        // However, SpellProjectile.LaunchSpellProjectiles uses CalculateProjectilevelocity etc. which uses "this" (Caster).
+                        // We need to manually construct the single projectile here to have full control.
+
+                        var nextChainCount = chainCount.Value - 1;
+
+                        if (WorldObjectFactory.CreateNewWorldObject(Spell.Wcid) is SpellProjectile sp)
+                        {
+                             sp.Setup(Spell, SpellType, null); // Variation null?
+                             
+                             // Origin: from creatureTarget
+                             var startLoc = creatureTarget.PhysicsObj.Position.ACEPosition();
+                             var targetLoc = bestTarget.PhysicsObj.Position.ACEPosition();
+
+                             // Offset a bit so it doesn't spawn *inside* the mob
+                             startLoc.Pos += new Vector3(0, 0, creatureTarget.Height * 0.66f); // rough height
+                             
+                             // Offset target so we don't aim at feet (and hit ground)
+                             targetLoc.Pos += new Vector3(0, 0, bestTarget.Height * 0.66f);
+
+                             // Calculate launch direction for safety offset
+                             var launchDir = Vector3.Normalize(targetLoc.Pos - startLoc.Pos);
+                             // Offset startLoc slightly towards target to avoid immediate collision with the source
+                             startLoc.Pos += launchDir * 0.5f;
+
+                             // Calculate velocity
+                             // "The new projectile moves **faster** than the original." - 1.25x
+                             var speed = 20.0f; // Default fast speed? Or retrieve from this projectile?
+                             if (preImpactVelocity != Vector3.Zero) speed = preImpactVelocity.Length();
+                             speed *= 1.25f;
+
+                             var gravity = PhysicsGlobals.Gravity; // Bolt/Blast don't use gravity usually?
+                             // Check if we assume linear for chains. Chains usually look cool if they zip.
+                             // Let's assume linear for chain bounces unless it's an Arc.
+                             var useGravity = SpellType == ProjectileSpellType.Arc;
+
+                             var velocity = Vector3.Zero;
+                             if (ServerConfig.trajectory_alt_solver.Value)
+                                velocity = Trajectory2.CalculateTrajectory(startLoc.Pos, targetLoc.Pos, bestTarget.PhysicsObj.CachedVelocity, speed, useGravity);
+                             else
+                             {
+                                var impactPoint = Vector3.Zero;
+                                var time = 0.0f;
+                                Trajectory.solve_ballistic_arc_lateral(startLoc.Pos, speed, targetLoc.Pos, bestTarget.PhysicsObj.CachedVelocity, useGravity ? gravity : 0.0f, out velocity, out time, out impactPoint);
+                             }
+
+                             if (velocity == Vector3.Zero)
+                                velocity = Vector3.Normalize(targetLoc.Pos - startLoc.Pos) * speed;
+
+                             sp.PhysicsObj.Velocity = velocity;
+                             sp.Location = startLoc;
+                             
+                             // Set orientation
+                             var dir = Vector3.Normalize(sp.Velocity);
+                             sp.PhysicsObj.Position.Frame.set_vector_heading(dir);
+                             sp.Location.Rotation = sp.PhysicsObj.Position.Frame.Orientation;
+
+                             sp.ProjectileSource = ProjectileSource;
+                             sp.ProjectileLauncher = ProjectileLauncher;
+                             sp.IsWeaponSpell = IsWeaponSpell;
+                             sp.FromProc = FromProc;
+                             sp.ProjectileTarget = bestTarget;
+                             sp.SpawnPos = new Position(sp.Location);
+                             sp.LifeProjectileDamage = LifeProjectileDamage;
+                            
+                             sp.SetProperty(PropertyInt.ChainCount, nextChainCount);
+                             sp.HitTargets = new List<ObjectGuid>(HitTargets); // Copy previous hits
+
+                             // Add to world
+                             if (LandblockManager.AddObject(sp))
+                             {
+                                sp.EnqueueBroadcast(new GameMessageScript(sp.Guid, PlayScript.Launch, sp.GetProjectileScriptIntensity(SpellType)));
+                             }
+                             else
+                                sp.Destroy();
+                        }
+                    }
+                }
 
                 // handle target procs
                 // note that for untargeted multi-projectile spells,

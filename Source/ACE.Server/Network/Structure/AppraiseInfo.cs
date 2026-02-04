@@ -756,6 +756,13 @@ namespace ACE.Server.Network.Structure
                 effectDescriptions.Add($"- Split Arrow: +{count} Targets, {val:P0} Dmg");
             }
 
+            // Chain Projectile
+            var chainCount = weapon.GetProperty(PropertyInt.ChainCount);
+            if (chainCount.HasValue && chainCount.Value > 0)
+            {
+                effectDescriptions.Add($"- Chain Projectile: {chainCount.Value} Bounces");
+            }
+
             // Crushing Blow
             if (weapon.GetProperty(PropertyFloat.CriticalMultiplier) > 1.0f)
             {

@@ -1836,6 +1836,13 @@ namespace ACE.Server.WorldObjects
 
                 sp.LifeProjectileDamage = lifeProjectileDamage;
 
+                if (weapon != null)
+                {
+                    var chainCount = weapon.GetProperty(PropertyInt.ChainCount);
+                    if (chainCount != null && chainCount > 0)
+                        sp.SetProperty(PropertyInt.ChainCount, chainCount.Value);
+                }
+
                 if (!LandblockManager.AddObject(sp))
                 {
                     sp.Destroy();
