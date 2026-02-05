@@ -276,6 +276,52 @@ namespace ACE.Server.WorldObjects
                 player.Session.Network.EnqueueSend(new GameMessageSystemChat(Info.ToString(), ChatMessageType.Broadcast));
             }
 
+            // Check for Flicker Strike
+            if ((GetProperty(PropertyBool.FlickerStrike) ?? false) && ProjectileSource is Player playerSource && target is Creature targetCreature && target != ProjectileSource)
+            {                
+                var dist = targetCreature.PhysicsObj.GetPhysicsRadius() + playerSource.PhysicsObj.GetPhysicsRadius() + 0.75f;
+                // Vector from Source -> Target (using Global coords for accuracy)
+                var sourceGlobal = playerSource.Location.ToGlobal();
+                var targetGlobal = targetCreature.Location.ToGlobal();
+                var dirToTarget = Vector3.Normalize(targetGlobal - sourceGlobal);
+                
+                // Offset -> Go THROUGH target to other side
+                var offset = dirToTarget * dist;
+                if (offset == System.Numerics.Vector3.Zero) offset = new System.Numerics.Vector3(dist, 0, 0);
+                
+                var destPos = targetCreature.PhysicsObj.Position.ACEPosition();
+                // We add the offset (which is derived from global direction) to the target's position.
+                // Since 'dist' is small (~2-3m), adding it to local Pos is safe enough, 
+                // and Position.SetPosition handles cell transitions if needed.
+                destPos.Pos += offset;
+                
+                // Rotation -> Turn around to face the target (-dirToTarget)
+                // We use a temporary AFrame to calculate the quaternion
+                var frame = new ACE.Server.Physics.Animation.AFrame();
+                frame.set_vector_heading(-dirToTarget);
+                destPos.Rotation = frame.Orientation;
+                
+                Console.WriteLine($"[SpellProjectile] Dir: {dirToTarget} -> Rot: {destPos.Rotation}");
+                
+                // Instant Blink
+                playerSource.Blink(destPos);
+                
+                // Immediately attack again (Loop)
+                if (targetCreature.IsAlive)
+                {
+                     // Use explicit finish method to bypass checks and force the hit
+                     playerSource.FinishFlickerStrike(targetCreature);
+                }
+                else
+                {
+                     playerSource.LaunchFlickerProjectile(playerSource.MeleeTarget);
+                }
+
+                // Return explicitly to prevent ProjectileImpact (and spell damage)
+                Destroy();
+                return;
+            }
+
             ProjectileImpact();
 
             // ensure valid creature target

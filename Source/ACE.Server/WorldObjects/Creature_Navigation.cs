@@ -86,12 +86,14 @@ namespace ACE.Server.WorldObjects
         /// <summary>
         /// Sends a TurnToObject command to the client
         /// </summary>
-        public void TurnToObject(WorldObject target, bool stopCompletely = true)
+        public void TurnToObject(WorldObject target, bool stopCompletely = true, float speed = 1.0f)
         {
             var turnToMotion = new Motion(this, target, MovementType.TurnToObject);
 
             if (!stopCompletely)
                 turnToMotion.MoveToParameters.MovementParameters &= ~MovementParams.StopCompletely;
+
+            turnToMotion.MoveToParameters.Speed = speed;
 
             EnqueueBroadcastMotion(turnToMotion);
         }
@@ -353,9 +355,9 @@ namespace ACE.Server.WorldObjects
 
         /// <summary>
         /// Unified Teleport method for all creatures (Player and Monster/NPC).
-        /// Handles visual effects, physics state changes, networking, and safety checks.
+        /// Handles visual effects, physics state changes, networking, and safety changes.
         /// </summary>
-        public virtual void Teleport(ACE.Entity.Position _newPosition, bool fromPortal = false)
+        public virtual void Teleport(ACE.Entity.Position _newPosition, bool fromPortal = false, bool instant = false)
         {
             var player = this as Player; // null if not a player
             var newPosition = new ACE.Entity.Position(_newPosition);

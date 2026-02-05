@@ -208,5 +208,9 @@ namespace ACE.Entity.Enum.Properties
         // Monster Capture System - POC
         IsCaptureCrystal                 = 9037,
         IsCapturedAppearance             = 9038,
+        
+        // Flicker Strike
+        [AssessmentProperty]
+        FlickerStrike                    = 9041,
     }
 }

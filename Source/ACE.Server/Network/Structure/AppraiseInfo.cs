@@ -807,6 +807,11 @@ namespace ACE.Server.Network.Structure
                 }
             }
 
+            if ((weapon.GetProperty(PropertyBool.FlickerStrike) ?? false))
+            {
+                effectDescriptions.Add("- Flicker Strike");
+            }
+
             if (effectDescriptions.Count > 0)
             {
                 effectDescriptions.Sort();

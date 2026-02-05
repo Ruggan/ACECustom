@@ -6,10 +6,17 @@ using ACE.Entity.Enum;
 using ACE.Entity.Enum.Properties;
 using ACE.Server.Entity;
 using ACE.Server.Entity.Actions;
+using ACE.Server.Factories;
 using ACE.Server.Managers;
 using ACE.Server.Network.GameEvent.Events;
+using ACE.Server.Network.GameMessages.Messages;
 using ACE.Server.Physics;
 using ACE.Server.Physics.Animation;
+using ACE.Server.Physics.Common;
+using ACE.Server.Physics.Extensions;
+using ACE.Entity;
+
+using Position = ACE.Entity.Position;
 
 namespace ACE.Server.WorldObjects
 {
@@ -146,6 +153,28 @@ namespace ACE.Server.WorldObjects
 
             //log.Info($"{Name}.HandleActionTargetedMeleeAttack({targetGuid:X8}, {attackHeight}, {powerLevel})");
 
+            // Check for Flicker Strike
+            var weapon = GetEquippedMeleeWeapon();
+            if (weapon != null && (weapon.GetProperty(PropertyBool.FlickerStrike) ?? false))
+            {
+                // Stamina Cost: 10%
+                var staminaCost = (int)(Stamina.MaxValue * 0.10f);
+                staminaCost = 10;
+
+                if (Stamina.Current > staminaCost)
+                {
+                    UpdateVitalDelta(Stamina, -staminaCost);
+                    LaunchFlickerProjectile(creatureTarget);
+                    // Skip standard attack
+                    // OnAttackDone();
+                    return;
+                }
+                else
+                {
+                     SendTransientError("Not enough stamina for Flicker Strike!");
+                }
+            }
+
             MeleeTarget = creatureTarget;
             AttackTarget = MeleeTarget;
 
@@ -184,6 +213,9 @@ namespace ACE.Server.WorldObjects
         public void HandleActionTargetedMeleeAttack_Inner(WorldObject target, int attackSequence)
         {
             var dist = GetCylinderDistance(target);
+            //Log info for debugging Flicker Strike loop
+            //if (GetProperty(PropertyBool.FlickerStrike) ?? false)
+            //    Console.WriteLine($"[Melee] Dist: {dist}, MeleeRange: {MeleeDistance + (LumAugmentMeleeRange ?? 0) * 0.1f}");
 
             if (dist <= (MeleeDistance + (LumAugmentMeleeRange ?? 0) * 0.1f) || dist <= StickyDistance && IsMeleeVisible(target))
             {
@@ -435,14 +467,41 @@ namespace ACE.Server.WorldObjects
 
                 var dist = GetCylinderDistance(target);
 
-                if (creature.IsAlive && GetCharacterOption(CharacterOption.AutoRepeatAttacks) && (dist <= (MeleeDistance + (LumAugmentMeleeRange ?? 0) * 0.1f) || dist <= StickyDistance && IsMeleeVisible(target)) && !IsBusy && !AttackCancelled)
+                bool isFlickerStrike = weapon.GetProperty(PropertyBool.FlickerStrike) ?? false;
+                if (isFlickerStrike)
+                {
+                    var allObjects = creature.CurrentLandblock.GetWorldObjectsForPhysicsHandling();
+                    float currentDist = 10000f;
+                    foreach (var wo in allObjects)
+                    {
+                        if (wo is Creature c && c.Attackable && c is not Player && c != creature && !c.IsDead)
+                        {
+                            float d = c.GetDistance(this);
+                            if (d <= currentDist)
+                            {
+                                currentDist = d;
+                                creature = c;
+                            }
+                        }
+                    }
+                    TurnToObject(creature, true, 10000f);
+                }
+
+                if (creature.IsAlive && GetCharacterOption(CharacterOption.AutoRepeatAttacks) && (dist <= (MeleeDistance + (LumAugmentMeleeRange ?? 0) * 0.1f) || dist <= StickyDistance && IsMeleeVisible(creature)) && !IsBusy && !AttackCancelled)
                 {
                     // client starts refilling power meter
                     Session.Network.EnqueueSend(new GameEventAttackDone(Session));
 
                     var nextAttack = new ActionChain();
                     nextAttack.AddDelaySeconds(nextRefillTime);
-                    nextAttack.AddAction(this, ActionType.PlayerMelee_Attack, () => Attack(target, attackSequence, true));
+                    if (isFlickerStrike)
+                    {
+                        nextAttack.AddAction(this, ActionType.PlayerMelee_Attack, () => LaunchFlickerProjectile(creature));
+                    }
+                    else
+                    {
+                        nextAttack.AddAction(this, ActionType.PlayerMelee_Attack, () => Attack(creature, attackSequence, true));
+                    }
                     nextAttack.EnqueueChain();
                 }
                 else
@@ -535,6 +594,103 @@ namespace ACE.Server.WorldObjects
             //Console.WriteLine($"{motion}");
 
             return motion;
+        }
+        public void LaunchFlickerProjectile(Creature target)
+        {
+            // Spell ID 95: Force Bolt I
+            var spell = new Spell((uint)SpellId.ForceBolt1);
+            
+            if (WorldObjectFactory.CreateNewWorldObject(spell.Wcid) is SpellProjectile sp)
+            {
+                // Setup
+                sp.Setup(spell, ProjectileSpellType.Bolt, null); 
+                
+                // Target Direction
+                // Ensure we use Global coordinates to handle different cells/landblocks correctly
+                var playerPosGlobal = Location.ToGlobal();
+                var targetPosGlobal = target.Location.ToGlobal();
+                
+                // Aim at center of mass
+                var aimSource = playerPosGlobal + new System.Numerics.Vector3(0, 0, Height * 0.66f);
+                var aimTarget = targetPosGlobal + new System.Numerics.Vector3(0, 0, target.Height * 0.66f);
+                
+                var dir = System.Numerics.Vector3.Normalize(aimTarget - aimSource);
+                
+                // 1. Turn to face target
+                Location.Rotate(dir);
+                PhysicsObj.Position.Frame.Orientation = Location.Rotation; // Force physics update too
+                
+                // 2. Calculate Spawn Origin (Front of player + buffer)
+                // Use physics radius + projectile radius estimate (approx 0.1f) + safety buffer
+                var radius = PhysicsObj.GetPhysicsRadius() + 0.1f + 0.2f;
+                // Use LOCAL coordinates for the spawn position assignment
+                var aimSourceLocal = Location.Pos + new System.Numerics.Vector3(0, 0, Height * 0.66f);
+                var startVector = aimSourceLocal + (dir * radius);
+                
+                sp.Location = new Position(Location);
+                sp.Location.Pos = startVector;
+                sp.Location.Rotation = Location.Rotation;
+
+                // Velocity: High speed direct shot
+                var speed = 500f; // Very fast
+                sp.PhysicsObj.Velocity = dir * speed;
+
+                // Orientation
+                // var dir = System.Numerics.Vector3.Normalize(sp.Velocity);
+                sp.PhysicsObj.Position.Frame.set_vector_heading(dir);
+                sp.Location.Rotation = sp.PhysicsObj.Position.Frame.Orientation;
+
+                // Properties
+                sp.ProjectileSource = this;
+                sp.ProjectileTarget = target;
+                sp.ProjectileLauncher = GetEquippedMeleeWeapon();
+                sp.SpawnPos = new Position(sp.Location);
+                
+                // Set FlickerStrike property on projectile to trigger teleport logic on impact
+                sp.SetProperty(PropertyBool.FlickerStrike, true);
+
+                if (LandblockManager.AddObject(sp))
+                {
+                     sp.EnqueueBroadcast(new GameMessageScript(sp.Guid, PlayScript.Launch, sp.GetProjectileScriptIntensity(ProjectileSpellType.Bolt)));
+                }
+                else
+                {
+                    sp.Destroy();
+                }
+            }
+        }
+
+        public void Blink(Position destPos)
+        {
+            var newPosition = new Position(destPos);
+            newPosition.PositionZ += 0.005f * (ObjScale ?? 1.0f);
+            
+            Console.WriteLine($"[Blink] Rotation Check: {newPosition.Rotation.X} {newPosition.Rotation.Y} {newPosition.Rotation.Z} {newPosition.Rotation.W}");
+
+            UpdatePosition(newPosition, true);
+            
+            // Explicitly sync Physics Orientation ensuring the packet carries the new rotation
+            if (PhysicsObj != null)
+            {
+                PhysicsObj.Position.Frame.Orientation = newPosition.Rotation;
+                PhysicsObj.Omega = System.Numerics.Vector3.Zero; // Stop spinning
+            }
+
+            // Increment ForcePosition sequence to make client accept the move without a portal screen
+            Sequences.GetNextSequence(Network.Sequence.SequenceType.ObjectForcePosition);
+            Session.Network.EnqueueSend(new GameMessageUpdatePosition(this, false));
+        }
+
+        public void FinishFlickerStrike(Creature target)
+        {
+            if (target == null) return;
+
+            // Turn very quickly to face the target.
+            TurnToObject(target, true, 1000f);
+            // Explicitly finish the attack sequence
+            // Bypass Flicker checks, distance checks (assume we teleported close enough), etc.
+            MeleeTarget = target;
+            Attack(target, 0); // 0 = first attack in sequence? or pass sequence?
         }
     }
 }
