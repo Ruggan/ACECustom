@@ -710,6 +710,8 @@ namespace ACE.Entity.Enum.Properties
         // Shiny Mobs System
         CreatureVariant                         = 9038, // Shiny variant on live creature
         CapturedCreatureVariant                 = 9039, // Shiny status copied to essence
+        [AssessmentProperty]
+        MoltenStrike                            = 9040, // Number of projectiles to spawn
 
     }
 
@@ -864,6 +866,9 @@ namespace ACE.Entity.Enum.Properties
 
                 //case PropertyInt.TypeOfAlteration:
                 //    return System.Enum.GetName(typeof(SkillAlterationType), value);
+
+                case PropertyInt.MoltenStrike:
+                    return "Molten Strike";
             }
 
             return null;

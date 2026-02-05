@@ -784,6 +784,14 @@ namespace ACE.Server.Network.Structure
                 effectDescriptions.Add($"- {ImbuedEffectType.CriticalStrike.DisplayName()}: +{mod:P1} Crit Chance");
             }
 
+            // Molten Strike
+            if (weapon.GetProperty(PropertyInt.MoltenStrike).HasValue)
+            {
+                var val = weapon.GetProperty(PropertyInt.MoltenStrike).Value;
+                if (val > 0)
+                    effectDescriptions.Add($"- Molten Strike: {val} Projectiles");
+            }
+
             // Elemental Rendings
             var rendings = new ImbuedEffectType[]
             {

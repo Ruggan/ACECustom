@@ -6,10 +6,15 @@ using ACE.Entity.Enum;
 using ACE.Entity.Enum.Properties;
 using ACE.Server.Entity;
 using ACE.Server.Entity.Actions;
+using ACE.Server.Factories;
 using ACE.Server.Managers;
 using ACE.Server.Network.GameEvent.Events;
+using ACE.Server.Network.GameMessages.Messages;
 using ACE.Server.Physics;
 using ACE.Server.Physics.Animation;
+using ACE.Common;
+
+using Position = ACE.Entity.Position;
 
 namespace ACE.Server.WorldObjects
 {
@@ -263,6 +268,92 @@ namespace ACE.Server.WorldObjects
             PhysicsObj.cancel_moveto();
         }
 
+        public void LaunchMoltenProjectiles(Creature target, int count)
+        {
+            // Spell ID 36: Flame Bolt I
+            var spellID = (uint)ACE.Entity.Enum.SpellId.RollingDeathFlame;
+            
+            var playerPos = Location.ToGlobal();
+
+            for (int i = 0; i < count; i++)
+            {
+                var spell = new Spell(spellID);
+                if (WorldObjectFactory.CreateNewWorldObject(spell.Wcid) is SpellProjectile sp)
+                {
+                    sp.Setup(spell, ProjectileSpellType.Bolt, null);
+                    
+                    sp.ProjectileSource = this;
+                    sp.ProjectileTarget = target; // Can be null if targeting ground? But we need a target for physics likely.
+                    sp.ProjectileLauncher = GetEquippedMeleeWeapon();
+                    
+                    // Decouple visuals from physics
+                    sp.ObjScale = 0.15f;                    // Visual Scale (Small)
+                    sp.SetProperty(ACE.Entity.Enum.Properties.PropertyFloat.SizeMod, 0.15f); // Force SizeMod as well
+                    sp.SetProperty(PropertyFloat.DefaultScale, 0.15f);
+                    sp.PhysicsObj.Scale = 0.4f;
+                    sp.PhysicsObj.SetScaleStatic(0.4f);     // Physics Scale (Larger for hits)
+                    
+                    sp.Ethereal = false; // Ensure it's visible
+                    // --- Physics Setup ---
+                    
+                    // Spawn at head height to clear potential obstacles
+                    var spawnPos = new Position(Location);
+                    spawnPos.PositionZ += 2 * Height; // Above head
+                    sp.Location = spawnPos;
+                    sp.SpawnPos = spawnPos;
+
+                    // Initialize Physics with Gravity
+                    sp.SetProjectilePhysicsState(target, true); // true = Use Gravity
+                    
+                    // Parameters for the "Rain" effect
+                    var upForce = 1f; // Initial upward burst
+                    var spreadForce = 3.0f; // Horizontal variance
+                    
+                    var randX = (float)ThreadSafeRandom.Next(-1.0f, 1.0f) * spreadForce;
+                    var randY = (float)ThreadSafeRandom.Next(-1.0f, 1.0f) * spreadForce;
+                    
+                    // Velocity Vector: Up + Random Spread
+                    var velocity = new System.Numerics.Vector3(randX, randY, upForce);
+                    
+                    // Rotate velocity to match player facing?
+                    // Actually, random spread around player is fine, or random forward cone?
+                    // Let's do random spread relative to player orientation explicitly if we want "cone"
+                    // But "Rain down around us" implies 360 or just general chaos.
+                    // Random XY is world-axis aligned. If the user turns, it might feel weird if it's always world-aligned.
+                    // Let's align it to player forward.
+                    var forward = PhysicsObj.Position.Frame.get_vector_heading();
+                    var right = System.Numerics.Vector3.Cross(forward, System.Numerics.Vector3.UnitZ);
+                    
+                    // Re-calculate with local frame
+                    
+                    var launchDir = (forward * (float)(ThreadSafeRandom.Next(-1.0f, 1.0f) * 0.5f)) + // Slight forward/back variance
+                                    (right * (float)(ThreadSafeRandom.Next(-1.0f, 1.0f) * 1.0f)) +   // Wider side variance?
+                                    (System.Numerics.Vector3.UnitZ * 1.0f); // Up
+                    
+                    launchDir = System.Numerics.Vector3.Normalize(launchDir);
+                    
+                    // Speed magnitude
+                    var speed = 10f; // Initial launch speed
+                    sp.PhysicsObj.Velocity = launchDir * speed;
+
+                    // Set Orientation to velocity
+                    sp.PhysicsObj.Position.Frame.set_vector_heading(launchDir);
+                    sp.Location.Rotation = sp.PhysicsObj.Position.Frame.Orientation;
+
+                    // Add to world
+                    if (LandblockManager.AddObject(sp))
+                    {
+                        sp.EnqueueBroadcast(new GameMessageScript(sp.Guid, PlayScript.Launch, sp.GetProjectileScriptIntensity(ProjectileSpellType.Bolt)));
+                    }
+                    else
+                    {
+                        sp.Destroy();
+                    }
+                }
+            }
+        }
+
+
         /// <summary>
         /// Performs a player melee attack against a target
         /// </summary>
@@ -286,6 +377,18 @@ namespace ACE.Server.WorldObjects
                 return;
             }
 
+            var weapon = GetEquippedMeleeWeapon();
+            
+            // Molten Strike (Proc on Swing)
+            if (weapon != null)
+            {
+               int moltenCount = weapon.GetProperty(PropertyInt.MoltenStrike) ?? 0;
+               if (moltenCount > 0)
+               {
+                   LaunchMoltenProjectiles(creature, moltenCount);
+               }
+            }
+
             var animLength = DoSwingMotion(target, out var attackFrames);
             if (animLength == 0)
             {
@@ -303,7 +406,6 @@ namespace ACE.Server.WorldObjects
                 Session.Network.EnqueueSend(new GameEventCombatCommenceAttack(Session));
             }
 
-            var weapon = GetEquippedMeleeWeapon();
             var attackType = GetWeaponAttackType(weapon);
             var numStrikes = GetNumStrikes(attackType);
             var swingTime = animLength / numStrikes / 1.5f;
